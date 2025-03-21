@@ -140,3 +140,172 @@ async def test_random1k(dut):
         assertEquals(exp_remainder, dut.o_remainder.value, msg)
         pass
     pass
+
+@cocotb.test()
+async def test_divisor1(dut):
+    """
+    Test dividing by 1 for random dividends.
+    Quotient should equal the dividend, remainder should be 0.
+    """
+    for _ in range(10):
+        await Timer(1, "ns")
+        dividend = random.randrange(0, 2**32)
+        divisor = 1
+        dut.i_dividend.value = dividend
+        dut.i_divisor.value = divisor
+        await Timer(1, "ns")
+
+        exp_quotient = dividend
+        exp_remainder = 0
+
+        msg = f"Dividing {dividend} by 1 should be quotient={exp_quotient}, remainder={exp_remainder}"
+        cu.assertEquals(exp_quotient, dut.o_quotient.value, msg)
+        cu.assertEquals(exp_remainder, dut.o_remainder.value, msg)
+    pass
+
+
+@cocotb.test()
+async def test_dividend0(dut):
+    """
+    Test a zero dividend with random divisors.
+    Quotient should be 0, remainder should be 0.
+    """
+    for _ in range(10):
+        await Timer(1, "ns")
+        dividend = 0
+        divisor = random.randrange(1, 2**32)  # nonzero
+        dut.i_dividend.value = dividend
+        dut.i_divisor.value = divisor
+        await Timer(1, "ns")
+
+        exp_quotient = 0
+        exp_remainder = 0
+
+        msg = f"Dividing 0 by {divisor} should be quotient=0, remainder=0"
+        cu.assertEquals(exp_quotient, dut.o_quotient.value, msg)
+        cu.assertEquals(exp_remainder, dut.o_remainder.value, msg)
+    pass
+
+
+@cocotb.test()
+async def test_divisor_larger_than_dividend(dut):
+    """
+    If the divisor is larger than the dividend,
+    then quotient should be 0, remainder should be the dividend.
+    """
+    for _ in range(10):
+        await Timer(1, "ns")
+        dividend = random.randrange(0, 2**16)
+        # Make divisor definitely larger by adding something well above 2^16
+        divisor = random.randrange(2**20, 2**32)
+
+        dut.i_dividend.value = dividend
+        dut.i_divisor.value = divisor
+        await Timer(1, "ns")
+
+        exp_quotient = 0
+        exp_remainder = dividend
+
+        msg = f"{dividend} / {divisor} => expected quotient=0, remainder={dividend}"
+        cu.assertEquals(exp_quotient, dut.o_quotient.value, msg)
+        cu.assertEquals(exp_remainder, dut.o_remainder.value, msg)
+    pass
+
+
+@cocotb.test()
+async def test_near_max_values(dut):
+    """
+    Test near maximum 32-bit values for both dividend and divisor.
+    """
+    test_values = [
+        (2**31 - 1, 2**31 - 1),
+        (2**31, 2**31 - 1),
+        (2**31 - 1, 2**31),
+        (0xFFFFFFFF, 0xFFFFFFFE),
+        (0xFFFFFFFE, 0xFFFFFFFF),
+    ]
+    for dividend, divisor in test_values:
+        await Timer(1, "ns")
+        dut.i_dividend.value = dividend
+        dut.i_divisor.value = divisor
+        await Timer(1, "ns")
+
+        exp_quotient = int(dividend // divisor)  # Python's floor division
+        exp_remainder = dividend % divisor
+
+        msg = f"Dividing {dividend} by {divisor}"
+        cu.assertEquals(exp_quotient, dut.o_quotient.value, msg + f" => quotient mismatch")
+        cu.assertEquals(exp_remainder, dut.o_remainder.value, msg + f" => remainder mismatch")
+    pass
+
+
+@cocotb.test()
+async def test_zero_dividend(dut):
+    """
+    0 / X -> quotient=0, remainder=0
+    """
+    await Timer(1, "ns")
+    dut.i_dividend.value = 0
+    # picking some random nonzero divisor
+    dut.i_divisor.value = 1234
+    await Timer(1, "ns")
+
+    cu.assertEquals(0, dut.o_quotient.value, "0 / 1234 should have quotient=0")
+    cu.assertEquals(0, dut.o_remainder.value, "0 / 1234 should have remainder=0")
+
+
+@cocotb.test()
+async def test_divisor_larger(dut):
+    """
+    If the divisor > dividend, quotient=0, remainder=dividend
+    """
+    await Timer(1, "ns")
+    dut.i_dividend.value = 10
+    dut.i_divisor.value = 9999
+    await Timer(1, "ns")
+
+    cu.assertEquals(0, dut.o_quotient.value, "10 / 9999 should have quotient=0")
+    cu.assertEquals(10, dut.o_remainder.value, "10 / 9999 should have remainder=10")
+
+
+@cocotb.test()
+async def test_divisor1(dut):
+    """
+    X / 1 => quotient=X, remainder=0
+    """
+    test_vals = [0, 1, 2, 9999, 2 ** 31, 2 ** 32 - 1]
+    for val in test_vals:
+        await Timer(1, "ns")
+        dut.i_dividend.value = val
+        dut.i_divisor.value = 1
+        await Timer(1, "ns")
+
+        msg = f"Dividing {val} by 1"
+        cu.assertEquals(val, dut.o_quotient.value, msg + " => quotient should be same as dividend")
+        cu.assertEquals(0, dut.o_remainder.value, msg + " => remainder should be 0")
+
+
+@cocotb.test()
+async def test_large_values(dut):
+    """
+    Tests near-maximum 32-bit values
+    """
+    # Some interesting corner cases near the 32-bit boundary
+    test_cases = [
+        (0xFFFFFFFE, 0xFFFFFFFF),  # divisor > dividend
+        (0xFFFFFFFF, 0xFFFFFFFE),  # remainder=1
+        (0xFFFFFFFF, 1),  # large / small
+        (2 ** 31, 2 ** 31 - 1),  # 2^31 / (2^31 - 1)
+    ]
+    for (dividend, divisor) in test_cases:
+        await Timer(1, "ns")
+        dut.i_dividend.value = dividend
+        dut.i_divisor.value = divisor
+        await Timer(1, "ns")
+
+        exp_quot = dividend // divisor
+        exp_rem = dividend % divisor
+
+        msg = f"Dividing {dividend} by {divisor}"
+        cu.assertEquals(exp_quot, dut.o_quotient.value, msg + " => quotient mismatch")
+        cu.assertEquals(exp_rem, dut.o_remainder.value, msg + " => remainder mismatch")

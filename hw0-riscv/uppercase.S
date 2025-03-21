@@ -1,22 +1,26 @@
-        .section .data
-input_string:   .asciz "Hello world!"
+.section .data
+my_string:
+    .asciz "Hello cis5710!\n"
 
-        # tohost/fromhost are data locations used by Spike
-        .align 8
-tohost: .byte 0
-        .align 8
-fromhost: .byte 0
+.section .text
+.globl _start
 
-        
-        .section .text
-        .globl _start
 _start:
-        # Load the address of the input string into a0
-        la a0, input_string
+    li   a0, 0x2000      # 0x2000 is where data is placed
+loop_start:
+    lb   t0, 0(a0)
+    beq  t0, zero, end_program
+    # Convert 'a'..'z' to uppercase
+    li   t1, 'a'
+    li   t2, 'z'
+    blt  t0, t1, skip
+    bgt  t0, t2, skip
+    li   t3, 0x20
+    sub  t0, t0, t3
+skip:
+    sb   t0, 0(a0)
+    addi a0, a0, 1
+    j loop_start
 
-        # Your code here!
-        
 end_program:
-        # jump here when you're done
-        j end_program
-
+    j end_program
