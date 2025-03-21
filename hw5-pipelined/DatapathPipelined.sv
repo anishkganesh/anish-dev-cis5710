@@ -57,10 +57,21 @@ module RegFile (
     input logic rst
 );
   localparam int NumRegs = 32;
-  genvar i;
   logic [`REG_SIZE] regs[NumRegs];
 
-  // TODO: your code here
+  // x0 is always 0.
+  assign rs1_data = (rs1 == 5'd0) ? 32'd0 : regs[rs1];
+  assign rs2_data = (rs2 == 5'd0) ? 32'd0 : regs[rs2];
+
+  always @(posedge clk) begin
+    if (rst) begin
+      for (int i = 0; i < NumRegs; i++) begin
+        regs[i] <= 32'd0;
+      end
+    end else if (we && (rd != 5'd0)) begin
+      regs[rd] <= rd_data;
+    end
+  end
 
 endmodule
 
@@ -69,7 +80,68 @@ typedef struct packed {
   logic [`REG_SIZE] pc;
   logic [`INSN_SIZE] insn;
   cycle_status_e cycle_status;
+  logic [6:0] insn_funct7;
+  logic [4:0] insn_rs2;
+  logic [4:0] insn_rs1;
+  logic [2:0] insn_funct3;
+  logic [4:0] insn_rd;
+  logic [`OPCODE_SIZE] insn_opcode;
+  logic [19:0] insn_imm_u;
+  logic [11:0] insn_imm_i;
+  logic [`REG_SIZE] rd_data;
+  logic we;
 } stage_decode_t;
+
+/** state at the start of Execute stage */
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [6:0] insn_funct7;
+  logic [4:0] insn_rs2;
+  logic [4:0] insn_rs1;
+  logic [2:0] insn_funct3;
+  logic [4:0] insn_rd;
+  logic [`OPCODE_SIZE] insn_opcode;
+  logic [19:0] insn_imm_u;
+  logic [11:0] insn_imm_i;
+  logic [`REG_SIZE] rd_data;
+  logic we;
+} stage_execute_t;
+
+/** state at the start of Memory stage */
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [6:0] insn_funct7;
+  logic [4:0] insn_rs2;
+  logic [4:0] insn_rs1;
+  logic [2:0] insn_funct3;
+  logic [4:0] insn_rd;
+  logic [`OPCODE_SIZE] insn_opcode;
+  logic [19:0] insn_imm_u;
+  logic [11:0] insn_imm_i;
+  logic [`REG_SIZE] rd_data;
+  logic we;
+} stage_memory_t;
+
+/** state at the start of Writeback stage */
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [6:0] insn_funct7;
+  logic [4:0] insn_rs2;
+  logic [4:0] insn_rs1;
+  logic [2:0] insn_funct3;
+  logic [4:0] insn_rd;
+  logic [`OPCODE_SIZE] insn_opcode;
+  logic [19:0] insn_imm_u;
+  logic [11:0] insn_imm_i;
+  logic [`REG_SIZE] rd_data;
+  logic we;
+} stage_writeback_t;
 
 module DatapathPipelined (
     input wire clk,
@@ -93,18 +165,18 @@ module DatapathPipelined (
 );
 
   // opcodes - see section 19 of RiscV spec
-  localparam bit [`OPCODE_SIZE] OpcodeLoad = 7'b00_000_11;
-  localparam bit [`OPCODE_SIZE] OpcodeStore = 7'b01_000_11;
-  localparam bit [`OPCODE_SIZE] OpcodeBranch = 7'b11_000_11;
-  localparam bit [`OPCODE_SIZE] OpcodeJalr = 7'b11_001_11;
-  localparam bit [`OPCODE_SIZE] OpcodeMiscMem = 7'b00_011_11;
-  localparam bit [`OPCODE_SIZE] OpcodeJal = 7'b11_011_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeLoad = 7'b00_000_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeStore = 7'b01_000_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeBranch = 7'b11_000_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeJalr = 7'b11_001_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeMiscMem = 7'b00_011_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeJal = 7'b11_011_11;
 
   localparam bit [`OPCODE_SIZE] OpcodeRegImm = 7'b00_100_11;
-  localparam bit [`OPCODE_SIZE] OpcodeRegReg = 7'b01_100_11;
-  localparam bit [`OPCODE_SIZE] OpcodeEnviron = 7'b11_100_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeRegReg = 7'b01_100_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeEnviron = 7'b11_100_11;
 
-  localparam bit [`OPCODE_SIZE] OpcodeAuipc = 7'b00_101_11;
+  // localparam bit [`OPCODE_SIZE] OpcodeAuipc = 7'b00_101_11;
   localparam bit [`OPCODE_SIZE] OpcodeLui = 7'b01_101_11;
 
   // cycle counter, not really part of any stage but useful for orienting within GtkWave
@@ -162,14 +234,34 @@ module DatapathPipelined (
       decode_state <= '{
         pc: 0,
         insn: 0,
-        cycle_status: CYCLE_RESET
+        cycle_status: CYCLE_RESET,
+        insn_funct7: 0,
+        insn_rs2: 0,
+        insn_rs1: 0,
+        insn_funct3: 0,
+        insn_rd: 0,
+        insn_opcode: 0,
+        insn_imm_u: 0,
+        insn_imm_i: 0, 
+        rd_data: 0,
+        we: 0
       };
     end else begin
       begin
         decode_state <= '{
           pc: f_pc_current,
           insn: f_insn,
-          cycle_status: f_cycle_status
+          cycle_status: f_cycle_status, 
+          insn_funct7: 7'd0,
+          insn_rs2: 5'd0,
+          insn_rs1: 5'd0,
+          insn_funct3: 3'd0,
+          insn_rd: 5'd0,
+          insn_opcode:  7'd0,
+          insn_imm_u: 20'd0,
+          insn_imm_i: 12'd0,
+          rd_data: 32'd0,
+          we: 0
         };
       end
     end
@@ -184,6 +276,333 @@ module DatapathPipelined (
 
   // TODO: your code here, though you will also need to modify some of the code above
   // TODO: the testbench requires that your register file instance is named `rf`
+
+  logic [19:0] d_insn_imm_u;
+  logic [11:0] d_insn_imm_i;
+  logic [4:0] d_insn_rd;
+  logic [4:0] d_insn_rs1;
+  logic [2:0] d_funct3;
+  logic [`OPCODE_SIZE] d_insn_opcode;
+  logic d_we;
+  logic d_illegal_insn;
+
+  always_comb begin
+    case (decode_state.insn[`OPCODE_SIZE]) 
+      OpcodeLui: begin
+        {d_insn_imm_u, d_insn_rd, d_insn_opcode} = decode_state.insn;
+        d_we = 1;
+      end
+
+      OpcodeRegImm: begin
+            {d_insn_imm_i, d_insn_rs1, d_funct3, d_insn_rd, d_insn_opcode} = decode_state.insn;
+            d_we = 1;
+      end
+
+      default: begin
+        d_illegal_insn = 1'b1;
+      end
+    endcase
+  end
+
+  /*****************/
+  /* EXECUTE STAGE */
+  /*****************/
+
+  stage_execute_t execute_state;
+
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      execute_state <= '{
+        pc: 0,
+        insn: 0,
+        cycle_status: CYCLE_RESET,
+        insn_funct7: 0,
+        insn_rs2: 0,
+        insn_rs1: 0,
+        insn_funct3: 0,
+        insn_rd: 0,
+        insn_opcode: 0,
+        insn_imm_u: 0,
+        insn_imm_i: 0,
+        rd_data: 0,
+        we: 0
+      };
+    end else begin
+      begin
+        execute_state <= '{
+          pc: decode_state.pc,
+          insn: decode_state.insn,
+          cycle_status: decode_state.cycle_status,
+          insn_funct7: decode_state.insn_funct7,
+          insn_rs2: decode_state.insn_rs2,
+          insn_rs1: d_insn_rs1,
+          insn_funct3: d_funct3,
+          insn_rd: d_insn_rd,
+          insn_opcode: d_insn_opcode,
+          insn_imm_u: d_insn_imm_u,
+          insn_imm_i: d_insn_imm_i,
+          rd_data: decode_state.rd_data,
+          we: d_we
+        };
+      end
+    end
+  end
+
+  wire [255:0] e_disasm;
+  Disasm #(
+      .PREFIX("E")
+  ) disasm_1execute (
+      .insn  (execute_state.insn),
+      .disasm(e_disasm)
+  );
+
+  logic [`REG_SIZE] e_rd_data;
+  logic e_illegal_insn;
+  logic [`REG_SIZE] e_cla_addi_a;
+  logic [`REG_SIZE] e_imm_i_sext;
+  logic [4:0] e_imm_shamt;
+
+  // instantiate CLA for ADDI
+  wire [`REG_SIZE] e_addi_result;
+  cla cla_addi (
+    .a(e_cla_addi_a),
+    .b({{20{execute_state.insn_imm_i[11]}}, execute_state.insn_imm_i[11:0]}),
+    .cin(1'b0),
+    .sum(e_addi_result)
+  );
+
+  // Execute Stage Operations
+  always_comb begin
+
+    e_imm_i_sext = {{20{execute_state.insn_imm_i[11]}}, execute_state.insn_imm_i[11:0]};
+    e_imm_shamt = execute_state.insn_imm_i[4:0];
+
+    case (execute_state.insn_opcode)
+      OpcodeLui: begin
+        e_rd_data = execute_state.insn_imm_u << 12;
+      end
+
+      OpcodeRegImm: begin
+        case (decode_state.insn_funct3)
+          3'b000: begin // ADDI
+            if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+              e_cla_addi_a = memory_state.rd_data;
+            end else begin
+              e_cla_addi_a = rs1_data;
+            end
+            e_rd_data = e_addi_result;
+          end
+
+          3'b010: begin // STLI
+            if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+              e_rd_data = ($signed(memory_state.rd_data) < $signed(e_imm_i_sext)) ? 32'd1 : 32'd0;
+            end else begin
+              e_rd_data = ($signed(rs1_data) < $signed(e_imm_i_sext)) ? 32'd1 : 32'd0;
+            end
+          end
+
+          3'b011: begin // STLIU
+            if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+              e_rd_data = (memory_state.rd_data < e_imm_i_sext) ? 32'd1 : 32'd0;
+            end else begin
+              e_rd_data = (rs1_data < e_imm_i_sext) ? 32'd1 : 32'd0;
+            end
+          end
+
+          3'b100: begin // XORI
+            if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+              e_rd_data = memory_state.rd_data ^ e_imm_i_sext;
+            end else begin
+              e_rd_data = rs1_data ^ e_imm_i_sext;
+            end
+          end
+
+          3'b110: begin // ORI
+            if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+              e_rd_data = memory_state.rd_data | e_imm_i_sext;
+            end else begin
+              e_rd_data = rs1_data | e_imm_i_sext;
+            end
+          end
+
+          3'b111: begin // ANDI
+            if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+              e_rd_data = memory_state.rd_data & e_imm_i_sext;
+            end else begin
+              e_rd_data = rs1_data & e_imm_i_sext;
+            end
+          end
+
+          3'b001: begin // SLLI
+            if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+              e_rd_data = memory_state.rd_data << e_imm_shamt;
+            end else begin
+              e_rd_data = rs1_data << e_imm_shamt;
+            end
+          end
+
+          3'b101: begin // SRLI + SRAI
+            if (execute_state.insn[31:25] == 7'd0) begin // SRLI
+              if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+                e_rd_data = memory_state.rd_data >> e_imm_shamt;
+              end else begin
+                e_rd_data = rs1_data >> e_imm_shamt;
+              end
+            end else if (execute_state.insn[31:25] == 7'b0100000) begin // SRAI
+              if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
+                e_rd_data = $signed(memory_state.rd_data) >>> e_imm_shamt;
+              end else begin
+                e_rd_data = $signed(rs1_data) >>> e_imm_shamt;
+              end
+            end else begin
+                e_illegal_insn = 1'b1;
+            end
+          end
+
+          default: begin
+            e_illegal_insn = 1'b1;
+          end
+          
+        endcase
+      end
+
+      // new Ops go here
+
+      default: begin
+        e_illegal_insn = 1'b1;
+      end
+    endcase
+  end
+
+  /****************/
+  /* MEMORY STAGE */
+  /****************/
+
+  stage_memory_t memory_state;
+
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      memory_state <= '{
+        pc: 0,
+        insn: 0,
+        cycle_status: CYCLE_RESET,
+        insn_funct7: 0,
+        insn_rs2: 0,
+        insn_rs1: 0,
+        insn_funct3: 0,
+        insn_rd: 0,
+        insn_opcode: 0,
+        insn_imm_u: 0,
+        insn_imm_i: 0,
+        rd_data: 0,
+        we: 0
+      };
+    end else begin
+      begin
+        memory_state <= '{
+          pc: execute_state.pc,
+          insn: execute_state.insn,
+          cycle_status: execute_state.cycle_status,
+          insn_funct7: execute_state.insn_funct7,
+          insn_rs2: execute_state.insn_rs2,
+          insn_rs1: execute_state.insn_rs1,
+          insn_funct3: execute_state.insn_funct3,
+          insn_rd: execute_state.insn_rd,
+          insn_opcode: execute_state.insn_opcode,
+          insn_imm_u: execute_state.insn_imm_u, 
+          insn_imm_i: execute_state.insn_imm_i,
+          rd_data: e_rd_data,
+          we: execute_state.we
+        };
+      end
+    end
+  end
+
+  wire [255:0] m_disasm;
+  Disasm #(
+      .PREFIX("M")
+  ) disasm_1memory (
+      .insn  (memory_state.insn),
+      .disasm(m_disasm)
+  );
+
+  // Memory Stage Operations
+  // always_comb begin
+  //   case (memory_state.insn_opcode)
+  //     
+  //   endcase
+  // end
+
+
+  /*******************/
+  /* WRITEBACK STAGE */
+  /*******************/
+
+  stage_writeback_t writeback_state;
+
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      writeback_state <= '{
+        pc: 0,
+        insn: 0,
+        cycle_status: CYCLE_RESET,
+        insn_funct7: 0,
+        insn_rs2: 0,
+        insn_rs1: 0,
+        insn_funct3: 0,
+        insn_rd: 0,
+        insn_opcode: 0,
+        insn_imm_u: 0,
+        insn_imm_i: 0,
+        rd_data: 0,
+        we: 0
+      };
+    end else begin
+      begin
+        writeback_state <= '{
+          pc: memory_state.pc,
+          insn: memory_state.insn,
+          cycle_status: memory_state.cycle_status,
+          insn_funct7: memory_state.insn_funct7,
+          insn_rs2: memory_state.insn_rs2,
+          insn_rs1: memory_state.insn_rs1,
+          insn_funct3: memory_state.insn_funct3,
+          insn_rd: memory_state.insn_rd,
+          insn_opcode: memory_state.insn_opcode,
+          insn_imm_u: memory_state.insn_imm_u, 
+          insn_imm_i: memory_state.insn_imm_i, 
+          rd_data: memory_state.rd_data,
+          we: memory_state.we
+        };
+      end
+    end
+  end
+
+  wire [255:0] w_disasm;
+  Disasm #(
+      .PREFIX("W")
+  ) disasm_1writeback (
+      .insn  (writeback_state.insn),
+      .disasm(w_disasm)
+  );
+
+  // Writeback Stage Operations
+
+  wire [`REG_SIZE] rs1_data;
+  wire [`REG_SIZE] rs2_data;
+
+  RegFile rf (
+    .clk(clk),
+    .rst(rst),
+    .we(writeback_state.we),
+    .rd(writeback_state.insn_rd),
+    .rd_data(writeback_state.rd_data),
+    .rs1(writeback_state.insn_rs1),
+    .rs2(writeback_state.insn_rs2),
+    .rs1_data(rs1_data),
+    .rs2_data(rs2_data)
+  );
+
 
 endmodule
 
