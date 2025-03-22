@@ -300,6 +300,7 @@ module DatapathPipelined (
 
       default: begin
         d_illegal_insn = 1'b1;
+        d_we = 0;
       end
     endcase
   end
@@ -361,6 +362,7 @@ module DatapathPipelined (
   logic [`REG_SIZE] e_cla_addi_a;
   logic [`REG_SIZE] e_imm_i_sext;
   logic [4:0] e_imm_shamt;
+  
 
   // instantiate CLA for ADDI
   wire [`REG_SIZE] e_addi_result;
@@ -383,10 +385,12 @@ module DatapathPipelined (
       end
 
       OpcodeRegImm: begin
-        case (decode_state.insn_funct3)
+        case (execute_state.insn_funct3)
           3'b000: begin // ADDI
             if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
               e_cla_addi_a = memory_state.rd_data;
+            end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+              e_cla_addi_a = writeback_state.rd_data;
             end else begin
               e_cla_addi_a = rs1_data;
             end
@@ -396,6 +400,8 @@ module DatapathPipelined (
           3'b010: begin // STLI
             if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
               e_rd_data = ($signed(memory_state.rd_data) < $signed(e_imm_i_sext)) ? 32'd1 : 32'd0;
+            end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+              e_rd_data = ($signed(writeback_state.rd_data) < $signed(e_imm_i_sext)) ? 32'd1 : 32'd0;
             end else begin
               e_rd_data = ($signed(rs1_data) < $signed(e_imm_i_sext)) ? 32'd1 : 32'd0;
             end
@@ -404,6 +410,8 @@ module DatapathPipelined (
           3'b011: begin // STLIU
             if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
               e_rd_data = (memory_state.rd_data < e_imm_i_sext) ? 32'd1 : 32'd0;
+            end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+              e_rd_data = (writeback_state.rd_data < e_imm_i_sext) ? 32'd1 : 32'd0;
             end else begin
               e_rd_data = (rs1_data < e_imm_i_sext) ? 32'd1 : 32'd0;
             end
@@ -412,6 +420,8 @@ module DatapathPipelined (
           3'b100: begin // XORI
             if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
               e_rd_data = memory_state.rd_data ^ e_imm_i_sext;
+            end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+              e_rd_data = writeback_state.rd_data ^ e_imm_i_sext;
             end else begin
               e_rd_data = rs1_data ^ e_imm_i_sext;
             end
@@ -420,6 +430,8 @@ module DatapathPipelined (
           3'b110: begin // ORI
             if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
               e_rd_data = memory_state.rd_data | e_imm_i_sext;
+            end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+              e_rd_data = writeback_state.rd_data | e_imm_i_sext;
             end else begin
               e_rd_data = rs1_data | e_imm_i_sext;
             end
@@ -428,6 +440,8 @@ module DatapathPipelined (
           3'b111: begin // ANDI
             if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
               e_rd_data = memory_state.rd_data & e_imm_i_sext;
+            end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+              e_rd_data = writeback_state.rd_data & e_imm_i_sext;
             end else begin
               e_rd_data = rs1_data & e_imm_i_sext;
             end
@@ -436,6 +450,8 @@ module DatapathPipelined (
           3'b001: begin // SLLI
             if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
               e_rd_data = memory_state.rd_data << e_imm_shamt;
+            end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+              e_rd_data = writeback_state.rd_data << e_imm_shamt;
             end else begin
               e_rd_data = rs1_data << e_imm_shamt;
             end
@@ -445,12 +461,16 @@ module DatapathPipelined (
             if (execute_state.insn[31:25] == 7'd0) begin // SRLI
               if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
                 e_rd_data = memory_state.rd_data >> e_imm_shamt;
+              end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+                e_rd_data = writeback_state.rd_data >> e_imm_shamt;
               end else begin
                 e_rd_data = rs1_data >> e_imm_shamt;
               end
             end else if (execute_state.insn[31:25] == 7'b0100000) begin // SRAI
               if (memory_state.insn_rd == execute_state.insn_rs1) begin // MX
                 e_rd_data = $signed(memory_state.rd_data) >>> e_imm_shamt;
+              end else if (writeback_state.insn_rd == execute_state.insn_rs1) begin // WX 
+                e_rd_data = $signed(writeback_state.rd_data) >>> e_imm_shamt;
               end else begin
                 e_rd_data = $signed(rs1_data) >>> e_imm_shamt;
               end
